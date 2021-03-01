@@ -2,13 +2,17 @@
 #define UNICODE
 #endif
 
+#ifndef GLEW_STATIC
 #define GLEW_STATIC
+#endif
 
 #include <windows.h>
 #include <WindowsX.h>
 #include <tchar.h>
 #include <GL/glew.h>
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
 #include <GL/gl.h>
 
 
@@ -25,6 +29,12 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
 HINSTANCE g_hInstance;
 HANDLE g_hConsole;
+HGLRC g_hRC;
+glm::mat4 g_viewMatrix;
+glm::vec3 g_viewPosition = glm::vec3(0.0f, 1.0f, 10.0f);
+glm::vec3 g_viewTarget = glm::vec3(0.0f, 0.0f, 0.0f);
+glm::vec3 g_viewUp = glm::vec3(0.0f, 1.0f, 0.0f);
+glm::mat4 g_projectionMatrix;
 
 /* OpenGL Triangle Initialization */
 float vertices[] = {
@@ -38,13 +48,15 @@ unsigned int vertexShader;
 unsigned int fragmentShader;
 unsigned int shaderProgram;
 
-Drawable* teapot;
+Drawable* g_teapot;
 
 const char* vertexShaderSource = "#version 330 core\n"
 "layout (location = 0) in vec3 aPos;\n"
+"uniform mat4 viewMatrix;\n"
+"uniform mat4 projectionMatrix;\n"
 "void main()\n"
 "{\n"
-"  gl_Position = vec4(aPos.x, aPos.y, aPos.z, 1.0);\n"
+"  gl_Position = projectionMatrix * viewMatrix * vec4(aPos.x, aPos.y, aPos.z, 1.0);\n"
 "}\0";
 const char* fragmentShaderSource = "#version 330 core\n"
 "out vec4 FragColor;\n"
@@ -122,6 +134,21 @@ BOOL SetupShaders()
     WriteToConsole(L"Linked shader program successfully.\n");
 
     glUseProgram(shaderProgram);
+
+    WriteToConsole(L"Initializing Camera\n");
+    g_viewMatrix = glm::lookAt(g_viewPosition, g_viewTarget, g_viewUp);
+
+    g_projectionMatrix = glm::perspective(
+        glm::radians(45.0f),
+        4.0f / 3.0f,
+        0.1f,
+        100.0f
+    );
+
+    int viewMatrixLocation = glGetUniformLocation(shaderProgram, "viewMatrix");
+    glUniformMatrix4fv(viewMatrixLocation, 1, GL_FALSE, glm::value_ptr(g_viewMatrix));
+    int projectionMatrixLocation = glGetUniformLocation(shaderProgram, "projectionMatrix");
+    glUniformMatrix4fv(projectionMatrixLocation, 1, GL_FALSE, glm::value_ptr(g_projectionMatrix));
     return TRUE;
 }
 
@@ -151,7 +178,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     int pf;
     HDC hDC;
     PIXELFORMATDESCRIPTOR pfd;
-    HGLRC hRC;
 
     g_hInstance = hInstance;
 
@@ -215,16 +241,16 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
     WriteToConsole(L"Creating gl context\n");
 
-    hRC = wglCreateContext(hDC);
+    g_hRC = wglCreateContext(hDC);
 
-    if (hRC == NULL) {
+    if (g_hRC == NULL) {
         MessageBox(NULL, L"Could not create GL context", L"Error", MB_OK | MB_ICONEXCLAMATION);
         return -1;
     }
 
     WriteToConsole(L"Making context current\n");
 
-    wglMakeCurrent(hDC, hRC);
+    wglMakeCurrent(hDC, g_hRC);
 
 
     WriteToConsole(L"Showing Window\n");
@@ -252,9 +278,46 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     WriteToConsole(L"Setting up Vertex Buffers\n");
     SetupVertexAttribs();
 
-    WriteToConsole(L"Initializing teapot.obj");
-    teapot = new Drawable("./teapot.obj");
-    WriteToConsole(L"Done initializing teapot.obj");
+    WriteToConsole(L"Initializing teapot.obj\n");
+    g_teapot = new Drawable("./teapot.obj");
+
+    Drawable* teapot = g_teapot;
+    teapot->setVertexShaderSource(vertexShaderSource);
+    teapot->setFragmentShaderSource(fragmentShaderSource);
+
+    {
+        bool success;
+        char* errorMessage;
+        success = teapot->compileVertexShader(&errorMessage);
+        if (!success) {
+            printf("Got an error compiling vertex shader:\n%s", errorMessage);
+            delete errorMessage;
+        }
+
+
+
+        success = teapot->compileFragmentShader(&errorMessage);
+        if (!success) {
+            printf("Got an error compiling vertex shader:\n%s", errorMessage);
+            delete errorMessage;
+        }
+
+
+        success = teapot->linkProgram(&errorMessage);
+        if (!success) {
+            printf("Got an error linking program:\n%s", errorMessage);
+            delete errorMessage;
+        }
+
+        success = teapot->setupBuffers(&errorMessage);
+        if (!success) {
+            printf("Got an error setting up buffers:\n%s", errorMessage);
+            delete errorMessage;
+        }
+
+    }
+
+    WriteToConsole(L"Done initializing teapot.obj\n");
 
     WriteToConsole(L"Beginning Message Loop\n");
 
@@ -267,11 +330,16 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
     wglMakeCurrent(NULL, NULL);
     ReleaseDC(hwnd, hDC);
-    wglDeleteContext(hRC);
+    wglDeleteContext(g_hRC);
     DestroyWindow(hwnd);
 
     return 0;
 }
+
+bool isDragging = false;
+POINT lastDragLocation = { };
+const float CAMERA_SPACE_FACTOR = 0.5f;
+const float MOUSE_WHEEL_FACTOR = 0.1f;
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
@@ -291,24 +359,28 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             swprintf(msg, 128, L"Width: %d, Height: %d\n", cs->cx, cs->cy);
             WriteToConsole(msg);
             glViewport(0, 0, cs->cx, cs->cy);
+            glClearColor(0.2f, 0.7f, 0.5f, 0.5f);
             glClear(GL_COLOR_BUFFER_BIT);
         }
         return 0;
 
     case WM_PAINT:
-        glUseProgram(shaderProgram);
-        glBindVertexArray(VAO);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
-        {
-            HDC hDC = GetDC(hwnd);
-            SwapBuffers(hDC);
-        }
-        glBindVertexArray(0);
-        glUseProgram(0);
-
         {
             PAINTSTRUCT ps;
-            BeginPaint(hwnd, &ps);
+            HDC hdc = BeginPaint(hwnd, &ps);
+            wglMakeCurrent(hdc, g_hRC);
+            glClear(GL_COLOR_BUFFER_BIT);
+
+            glUseProgram(shaderProgram);
+            
+            g_viewMatrix = glm::lookAt(g_viewPosition, g_viewTarget, g_viewUp);
+
+            int viewMatrixLocation = glGetUniformLocation(shaderProgram, "viewMatrix");
+            glUniformMatrix4fv(viewMatrixLocation, 1, GL_FALSE, glm::value_ptr(g_viewMatrix));
+
+            g_teapot->draw();
+
+            SwapBuffers(hdc);
             EndPaint(hwnd, &ps);
         }
 
@@ -321,8 +393,67 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         wchar_t msg[256];
         swprintf(msg, 128, L"User clicked: %d, %d\n", xPos, yPos);
         WriteToConsole(msg);
+
+        POINT pt = { xPos, yPos };
+        if (DragDetect(hwnd, pt))
+        {
+            WriteToConsole(L"Initiating click and drag\n");
+            isDragging = true;
+            lastDragLocation = pt;
+        }
+        return 0;
     }
-    return 0;
+    case WM_MOUSEMOVE:
+    {
+        if (isDragging) {
+            WriteToConsole(L"Expecting to move object here\n");
+            int x = GET_X_LPARAM(lParam);
+            int y = GET_Y_LPARAM(lParam);
+            POINT latest{ x, y };
+            int deltaX = latest.x - lastDragLocation.x;
+            int deltaY = latest.y - lastDragLocation.y;
+            float deltaXCamera = CAMERA_SPACE_FACTOR * deltaX;
+            float deltaYCamera = CAMERA_SPACE_FACTOR * deltaY;
+            wchar_t msg[256];
+            swprintf(msg, 256, L"translating camera matrix %f, %f\n", deltaXCamera, deltaYCamera);
+            WriteToConsole(msg);
+
+            g_viewPosition += glm::vec3(deltaXCamera, deltaYCamera, 0.0f);
+            lastDragLocation = latest;
+            SendMessage(hwnd, WM_PAINT, NULL, NULL);
+        }
+
+        return 0;
+    }
+    case WM_LBUTTONUP:
+    {
+        if (isDragging) {
+
+            WriteToConsole(L"Drag stopped\n");
+            isDragging = false;
+            lastDragLocation = { };
+        }
+
+        return 0;
+    }
+    case WM_MOUSEWHEEL:
+    {
+        short wScrollWheelDirection = HIWORD(wParam);
+
+        float scrollWheelDirection = static_cast<double>(wScrollWheelDirection) / 120.0f;
+
+        wchar_t msg[128];
+        swprintf(msg, 128, L"Preparing to zoom: %f\n", scrollWheelDirection);
+        WriteToConsole(msg);
+
+        glm::vec3 cameraDirection = g_viewTarget - g_viewPosition;
+        cameraDirection = cameraDirection / magnitude(cameraDirection);
+        g_viewPosition += (cameraDirection * scrollWheelDirection * MOUSE_WHEEL_FACTOR);
+        g_viewMatrix = glm::lookAt(g_viewPosition, g_viewTarget, g_viewUp);
+        
+        SendMessage(hwnd, WM_PAINT, NULL, NULL);
+        return 0;
+    }
     default:
         return DefWindowProc(hwnd, uMsg, wParam, lParam);
     }

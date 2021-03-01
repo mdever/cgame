@@ -2,8 +2,11 @@
 #define UTILS_HPP
 
 #include <windows.h>
+#include <glm/glm.hpp>
 
 BOOL WriteToConsole(const wchar_t* msg);
+BOOL WriteToConsole(const char* msg);
+float magnitude(glm::vec3 v);
 
 #endif
 #pragma once
