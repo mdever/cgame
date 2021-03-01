@@ -20,8 +20,11 @@ public:
 	Camera(glm::vec3 position, glm::vec3 target, glm::vec3 up);
 
 	Camera& setPosition(float x, float y, float z);
+	Camera& setPosition(glm::vec3 position);
 	Camera& setUp(float x, float y, float z);
+	Camera& setUp(glm::vec3 up);
 	Camera& setTarget(float x, float y, float z);
+	Camera& setTarget(glm::vec3 target);
 
 	Camera& move(glm::vec3 delta);
 

@@ -18,6 +18,7 @@
 
 #include "Utils.hpp"
 #include "Drawable.hpp"
+#include "Camera.hpp"
 
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
@@ -49,6 +50,7 @@ unsigned int fragmentShader;
 unsigned int shaderProgram;
 
 Drawable* g_teapot;
+Camera* g_camera;
 
 const char* vertexShaderSource = "#version 330 core\n"
 "layout (location = 0) in vec3 aPos;\n"
@@ -280,6 +282,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
     WriteToConsole(L"Initializing teapot.obj\n");
     g_teapot = new Drawable("./teapot.obj");
+    g_camera = new Camera(g_viewPosition, g_viewTarget, g_viewUp);
 
     Drawable* teapot = g_teapot;
     teapot->setVertexShaderSource(vertexShaderSource);
@@ -337,9 +340,12 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 }
 
 bool isDragging = false;
+bool truckPedestalDrag = false;
 POINT lastDragLocation = { };
-const float CAMERA_SPACE_FACTOR = 0.5f;
+POINT lastPedestalDragLocation = { };
+const float CAMERA_SPACE_FACTOR = 0.1f;
 const float MOUSE_WHEEL_FACTOR = 0.1f;
+const float FLAT_MOVE_FACTOR = 0.04f;
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
@@ -372,11 +378,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             glClear(GL_COLOR_BUFFER_BIT);
 
             glUseProgram(shaderProgram);
-            
-            g_viewMatrix = glm::lookAt(g_viewPosition, g_viewTarget, g_viewUp);
 
             int viewMatrixLocation = glGetUniformLocation(shaderProgram, "viewMatrix");
-            glUniformMatrix4fv(viewMatrixLocation, 1, GL_FALSE, glm::value_ptr(g_viewMatrix));
+            glUniformMatrix4fv(viewMatrixLocation, 1, GL_FALSE, glm::value_ptr(g_camera->viewMatrix));
 
             g_teapot->draw();
 
@@ -415,11 +419,30 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             float deltaXCamera = CAMERA_SPACE_FACTOR * deltaX;
             float deltaYCamera = CAMERA_SPACE_FACTOR * deltaY;
             wchar_t msg[256];
+            swprintf(msg, 256, L"translating camera matrix radially %f, %f\n", deltaXCamera, deltaYCamera);
+            WriteToConsole(msg);
+
+            g_camera->move(glm::vec3(deltaXCamera, deltaYCamera, 0.0f));
+            lastDragLocation = latest;
+            SendMessage(hwnd, WM_PAINT, NULL, NULL);
+        }
+
+        if (truckPedestalDrag) {
+            WriteToConsole(L"Expecting to flat move camera\n");
+            int x = GET_X_LPARAM(lParam);
+            int y = GET_Y_LPARAM(lParam);
+            POINT latest = POINT{ x, y };
+            int deltaX = latest.x - lastPedestalDragLocation.x;
+            int deltaY = latest.y - lastPedestalDragLocation.y;
+            float deltaXCamera = CAMERA_SPACE_FACTOR * deltaX;
+            float deltaYCamera = CAMERA_SPACE_FACTOR * deltaY;
+            wchar_t msg[256];
             swprintf(msg, 256, L"translating camera matrix %f, %f\n", deltaXCamera, deltaYCamera);
             WriteToConsole(msg);
 
-            g_viewPosition += glm::vec3(deltaXCamera, deltaYCamera, 0.0f);
-            lastDragLocation = latest;
+            g_camera->truckRight(deltaXCamera * FLAT_MOVE_FACTOR);
+            g_camera->pedestalUp(deltaYCamera * FLAT_MOVE_FACTOR);
+            lastPedestalDragLocation = latest;
             SendMessage(hwnd, WM_PAINT, NULL, NULL);
         }
 
@@ -428,7 +451,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     case WM_LBUTTONUP:
     {
         if (isDragging) {
-
             WriteToConsole(L"Drag stopped\n");
             isDragging = false;
             lastDragLocation = { };
@@ -446,13 +468,26 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         swprintf(msg, 128, L"Preparing to zoom: %f\n", scrollWheelDirection);
         WriteToConsole(msg);
 
-        glm::vec3 cameraDirection = g_viewTarget - g_viewPosition;
-        cameraDirection = cameraDirection / magnitude(cameraDirection);
-        g_viewPosition += (cameraDirection * scrollWheelDirection * MOUSE_WHEEL_FACTOR);
-        g_viewMatrix = glm::lookAt(g_viewPosition, g_viewTarget, g_viewUp);
+        g_camera->moveForward(scrollWheelDirection * MOUSE_WHEEL_FACTOR);
         
         SendMessage(hwnd, WM_PAINT, NULL, NULL);
         return 0;
+    }
+    case WM_MBUTTONDOWN:
+    {
+        POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        truckPedestalDrag = true;
+        WriteToConsole(L"About to activate flat movement\n");
+        lastPedestalDragLocation = pt;
+
+        return 0;
+    }
+    case WM_MBUTTONUP:
+    {
+        if (truckPedestalDrag) {
+            truckPedestalDrag = false;
+            lastPedestalDragLocation = { };
+        }
     }
     default:
         return DefWindowProc(hwnd, uMsg, wParam, lParam);
