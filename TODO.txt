@@ -1,0 +1,6 @@
+1. Expand OBJ loader to account for vertex normals and texture coords
+2. Improve shaders to use lighting
+	a) ambient
+	b) diffuse
+	c) specular
+	d) Phone 
