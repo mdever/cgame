@@ -24,7 +24,7 @@ BOOL WriteToConsole(const char* msg)
 
 float magnitude(glm::vec3 v)
 {
-    return std::cbrt(v.x*v.x + v.y*v.y + v.z*v.z);
+    return std::sqrt(v.x*v.x + v.y*v.y + v.z*v.z);
 }
 
 glm::vec3 normalize(glm::vec3 v)

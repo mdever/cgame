@@ -144,7 +144,7 @@ BOOL SetupShaders()
         glm::radians(45.0f),
         4.0f / 3.0f,
         0.1f,
-        100.0f
+        1000.0f
     );
 
     int viewMatrixLocation = glGetUniformLocation(shaderProgram, "viewMatrix");
@@ -343,9 +343,9 @@ bool isDragging = false;
 bool truckPedestalDrag = false;
 POINT lastDragLocation = { };
 POINT lastPedestalDragLocation = { };
-const float CAMERA_SPACE_FACTOR = 0.1f;
-const float MOUSE_WHEEL_FACTOR = 0.1f;
-const float FLAT_MOVE_FACTOR = 0.04f;
+const float CAMERA_SPACE_FACTOR = 1.0f;
+const float MOUSE_WHEEL_FACTOR = 0.5f;
+const float FLAT_MOVE_FACTOR = 0.02f;
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
@@ -415,14 +415,15 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             int y = GET_Y_LPARAM(lParam);
             POINT latest{ x, y };
             int deltaX = latest.x - lastDragLocation.x;
-            int deltaY = latest.y - lastDragLocation.y;
+            int deltaY = lastDragLocation.y - latest.y;
             float deltaXCamera = CAMERA_SPACE_FACTOR * deltaX;
             float deltaYCamera = CAMERA_SPACE_FACTOR * deltaY;
             wchar_t msg[256];
             swprintf(msg, 256, L"translating camera matrix radially %f, %f\n", deltaXCamera, deltaYCamera);
             WriteToConsole(msg);
 
-            g_camera->move(glm::vec3(deltaXCamera, deltaYCamera, 0.0f));
+            g_camera->moveRadiallyUp(deltaYCamera);
+            g_camera->moveRadiallyRight(deltaXCamera);
             lastDragLocation = latest;
             SendMessage(hwnd, WM_PAINT, NULL, NULL);
         }
@@ -434,14 +435,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             POINT latest = POINT{ x, y };
             int deltaX = latest.x - lastPedestalDragLocation.x;
             int deltaY = latest.y - lastPedestalDragLocation.y;
-            float deltaXCamera = CAMERA_SPACE_FACTOR * deltaX;
-            float deltaYCamera = CAMERA_SPACE_FACTOR * deltaY;
+            float deltaXCamera = FLAT_MOVE_FACTOR * deltaX;
+            float deltaYCamera = FLAT_MOVE_FACTOR * deltaY;
             wchar_t msg[256];
             swprintf(msg, 256, L"translating camera matrix %f, %f\n", deltaXCamera, deltaYCamera);
             WriteToConsole(msg);
 
-            g_camera->truckRight(deltaXCamera * FLAT_MOVE_FACTOR);
-            g_camera->pedestalUp(deltaYCamera * FLAT_MOVE_FACTOR);
+            g_camera->truckRight(deltaXCamera);
+            g_camera->pedestalUp(deltaYCamera);
             lastPedestalDragLocation = latest;
             SendMessage(hwnd, WM_PAINT, NULL, NULL);
         }
