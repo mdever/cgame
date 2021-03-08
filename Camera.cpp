@@ -4,6 +4,7 @@
 #include <cmath>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/rotate_vector.hpp>
 
 static const float PI = 3.14159265358979323846;
 
@@ -191,12 +192,31 @@ Camera& Camera::truckRight(float distance)
 
 Camera& Camera::panUp(float degrees)
 {
-	// TODO: insert return statement here
+	float theta = glm::radians(degrees);
+	glm::vec3 upNormalized = normalize(this->up);
+	glm::vec3 toTarget = this->target - this->position;
+	glm::vec3 toTargetNormalized = normalize(toTarget);
+	float deltaUp = magnitude(toTarget) * std::sin(theta);
+	float deltaBack = deltaUp / std::tan((PI - theta) / 2);
+	this->target -= deltaUp * upNormalized;
+	this->target += deltaBack * toTargetNormalized;
+	this->up = glm::rotate(this->up, theta, glm::cross(toTargetNormalized, upNormalized));
+	this->viewMatrix = glm::lookAt(this->position, this->target, this->up);
 	return *this;
 }
 
 Camera& Camera::panRight(float degrees)
 {
-	// TODO: insert return statement here
+	float theta = glm::radians(degrees);
+	glm::vec3 upNormalized = normalize(this->up);
+	glm::vec3 toTarget = this->target - this->position;
+	glm::vec3 toTargetNormalized = normalize(toTarget);
+	glm::vec3 rightNormalized = normalize(glm::cross(toTargetNormalized, upNormalized));
+	float deltaRight = magnitude(toTarget) * std::sin(theta);
+	float deltaBack = deltaRight / std::tan((PI - theta) / 2);
+	this->target += deltaRight * rightNormalized;
+	this->target += deltaBack * toTargetNormalized;
+	this->viewMatrix = glm::lookAt(this->position, this->target, this->up);
+	return *this;
 	return *this;
 }

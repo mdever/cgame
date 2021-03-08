@@ -19,6 +19,7 @@
 #include "Utils.hpp"
 #include "Drawable.hpp"
 #include "Camera.hpp"
+#include "Scene.hpp"
 
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
@@ -36,6 +37,8 @@ glm::vec3 g_viewPosition = glm::vec3(0.0f, 1.0f, 10.0f);
 glm::vec3 g_viewTarget = glm::vec3(0.0f, 0.0f, 0.0f);
 glm::vec3 g_viewUp = glm::vec3(0.0f, 1.0f, 0.0f);
 glm::mat4 g_projectionMatrix;
+Scene g_scene;
+
 
 /* OpenGL Triangle Initialization */
 float vertices[] = {
@@ -54,17 +57,33 @@ Camera* g_camera;
 
 const char* vertexShaderSource = "#version 330 core\n"
 "layout (location = 0) in vec3 aPos;\n"
+"layout (location = 1) in vec3 normal;\n"
+"out vec3 vNormal;\n"
+"out vec3 vPosition;\n"
+"uniform mat4 modelMatrix;\n"
 "uniform mat4 viewMatrix;\n"
 "uniform mat4 projectionMatrix;\n"
 "void main()\n"
 "{\n"
-"  gl_Position = projectionMatrix * viewMatrix * vec4(aPos.x, aPos.y, aPos.z, 1.0);\n"
+"  vNormal = normal;\n"
+"  vPosition = aPos;\n"
+"  gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(aPos.x, aPos.y, aPos.z, 1.0);\n"
 "}\0";
 const char* fragmentShaderSource = "#version 330 core\n"
+"in vec3 vNormal;\n"
+"in vec3 vPosition;\n"
 "out vec4 FragColor;\n"
 "void main()\n"
 "{\n"
-"  FragColor = vec4(1.0f, 0.5f, 0.2f, 1.0f);\n"
+"  vec3 objectColor = vec3(0.262f, 0.361f, 1.0f);\n"
+"  vec3 ambient = vec3(1.0f, 1.0f, 1.0f);\n"
+"  vec3 lightPos = vec3(5.0f, 10.0f, 20.0f);\n"
+"  vec3 norm = normalize(vNormal);\n"
+"  vec3 lightDir = normalize(lightPos - vPosition);\n"
+"  float diff = max(dot(norm, lightDir), 0.0);\n"
+"  vec3 diffuse = diff * vec3(0.8, 0.8, 0.8);\n"
+"  vec3 result = (ambient + diffuse) * objectColor;\n"
+"  FragColor = vec4(result, 1.0f);\n"
 "}\0";
 
 BOOL SetupShaders()
@@ -76,6 +95,10 @@ BOOL SetupShaders()
 
     glViewport(0, 0, 800, 600);
     glEnable(GL_MULTISAMPLE);
+    glEnable(GL_CULL_FACE);
+    glFrontFace(GL_CW);
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_ALWAYS);
     memset(wShaderSource, 0, 512);
     size_t bytesWritten;
     mbstowcs_s(&bytesWritten, wShaderSource, vertexShaderSource, strlen(vertexShaderSource));
@@ -141,7 +164,7 @@ BOOL SetupShaders()
     g_viewMatrix = glm::lookAt(g_viewPosition, g_viewTarget, g_viewUp);
 
     g_projectionMatrix = glm::perspective(
-        glm::radians(45.0f),
+        glm::radians(25.0f),
         4.0f / 3.0f,
         0.1f,
         1000.0f
@@ -280,11 +303,11 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     WriteToConsole(L"Setting up Vertex Buffers\n");
     SetupVertexAttribs();
 
-    WriteToConsole(L"Initializing teapot.obj\n");
-    g_teapot = new Drawable("./teapot.obj");
+    WriteToConsole(L"Initializing teapot2.obj\n");
+    g_teapot = new Drawable("./teapot2.obj");
     g_camera = new Camera(g_viewPosition, g_viewTarget, g_viewUp);
 
-    Drawable* teapot = g_teapot;
+    std::shared_ptr<Drawable> teapot(g_teapot);
     teapot->setVertexShaderSource(vertexShaderSource);
     teapot->setFragmentShaderSource(fragmentShaderSource);
 
@@ -319,6 +342,10 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
         }
 
     }
+    std::shared_ptr<Camera> camera(g_camera);
+    std::shared_ptr<Scene> scene(&g_scene);
+    scene->setCamera(camera);
+    scene->addDrawable(teapot);
 
     WriteToConsole(L"Done initializing teapot.obj\n");
 
@@ -341,11 +368,14 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
 bool isDragging = false;
 bool truckPedestalDrag = false;
+bool isRightButtonDragging = false;
+POINT lastRightButtonDragLocation = { };
 POINT lastDragLocation = { };
 POINT lastPedestalDragLocation = { };
 const float CAMERA_SPACE_FACTOR = 1.0f;
-const float MOUSE_WHEEL_FACTOR = 0.5f;
+const float MOUSE_WHEEL_FACTOR = 1.0f;
 const float FLAT_MOVE_FACTOR = 0.02f;
+const float RIGHT_CLICK_DRAG_FACTOR = 0.5f;
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
@@ -378,12 +408,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             glClear(GL_COLOR_BUFFER_BIT);
 
             glUseProgram(shaderProgram);
-
             int viewMatrixLocation = glGetUniformLocation(shaderProgram, "viewMatrix");
             glUniformMatrix4fv(viewMatrixLocation, 1, GL_FALSE, glm::value_ptr(g_camera->viewMatrix));
 
-            g_teapot->draw();
-
+            //g_teapot->draw();
+            g_scene.draw();
             SwapBuffers(hdc);
             EndPaint(hwnd, &ps);
         }
@@ -407,9 +436,27 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         }
         return 0;
     }
+    case WM_RBUTTONDOWN:
+    {
+        isRightButtonDragging = true;
+        int xPos = GET_X_LPARAM(lParam);
+        int yPos = GET_Y_LPARAM(lParam);
+        lastRightButtonDragLocation = POINT{ xPos, yPos };
+        return 0;
+    }
+    case WM_RBUTTONUP:
+    {
+        if (isRightButtonDragging)
+        {
+            isRightButtonDragging = false;
+            lastRightButtonDragLocation = POINT{};
+        }
+        return 0;
+    }
     case WM_MOUSEMOVE:
     {
-        if (isDragging) {
+        if (isDragging)
+        {
             WriteToConsole(L"Expecting to move object here\n");
             int x = GET_X_LPARAM(lParam);
             int y = GET_Y_LPARAM(lParam);
@@ -428,7 +475,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             SendMessage(hwnd, WM_PAINT, NULL, NULL);
         }
 
-        if (truckPedestalDrag) {
+        if (truckPedestalDrag)
+        {
             WriteToConsole(L"Expecting to flat move camera\n");
             int x = GET_X_LPARAM(lParam);
             int y = GET_Y_LPARAM(lParam);
@@ -445,6 +493,26 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
             g_camera->pedestalUp(deltaYCamera);
             lastPedestalDragLocation = latest;
             SendMessage(hwnd, WM_PAINT, NULL, NULL);
+        }
+
+        if (isRightButtonDragging)
+        {
+            int xPos = GET_X_LPARAM(lParam);
+            int yPos = GET_Y_LPARAM(lParam);
+            POINT latest = POINT{ xPos, yPos };
+            int deltaX = latest.x - lastRightButtonDragLocation.x;
+            int deltaY = latest.y - lastRightButtonDragLocation.y;
+            float deltaXCamera = RIGHT_CLICK_DRAG_FACTOR * deltaX;
+            float deltaYCamera = RIGHT_CLICK_DRAG_FACTOR * deltaY;
+            
+            g_camera->panRight(deltaXCamera);
+            g_camera->panUp(deltaYCamera);
+
+            lastRightButtonDragLocation = latest;
+
+            SendMessage(hwnd, WM_PAINT, NULL, NULL);
+            
+            return 0;
         }
 
         return 0;
