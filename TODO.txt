@@ -1,6 +1,10 @@
 1. Expand OBJ loader to account for vertex normals and texture coords
+	a) Normals - Done
+	b) Texture
 2. Improve shaders to use lighting
-	a) ambient
-	b) diffuse
+	a) ambient - Done
+	b) diffuse - Done
 	c) specular
 	d) Phone 
+3. Implement Model Matrix for drawable
+4. Implement a skybox. Depends on 1 and 3
